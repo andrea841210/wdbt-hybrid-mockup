@@ -1,0 +1,13 @@
+{
+  "sample_id": "TS260508003",
+  "mode": "Function 2 static completed-flow preview",
+  "pan_syndrome_recall": ["PS001", "PS003", "PS005"],
+  "risk_strata_summary": "Static preview only. Risk strata logic pending PM / bioinformatics confirmation.",
+  "output_sections": [
+    "Pan-syndrome recall",
+    "Risk strata ranking",
+    "Reporting package output"
+  ],
+  "disclaimer_en": "Demo preview only. Risk strata logic pending PM / bioinformatics confirmation.",
+  "disclaimer_zh": "本頁為示意預覽；正式風險分層邏輯待 PM / 生資確認後導入。"
+}

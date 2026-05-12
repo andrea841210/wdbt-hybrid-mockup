@@ -1,0 +1,6 @@
+module,pan_syndrome_id,pan_syndrome_label_zh,display_order
+Neuro,PS001,"發展感覺比同齡孩子慢，例如坐、爬、站、走比較晚",1
+Neuro,PS003,"叫名字反應少，或對人互動反應比較少",2
+Neuro,PS005,"原本會的能力後來退步了",3
+Neuro,PS007,"動作協調或肌肉張力看起來不太穩定",4
+Neuro,PS009,"學習、理解或語言表達速度與同齡孩子有差異",5
