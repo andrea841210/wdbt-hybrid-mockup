@@ -24,7 +24,7 @@ ASSET_DIR = Path("assets")
 @st.cache_data
 def load_pan_syndrome_master() -> pd.DataFrame:
     path = DATA_DIR / "pan_syndrome_master.csv"
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, sep=None, engine="python")
     expected_cols = {
         "pan_syndrome_id",
         "display_order",
@@ -44,7 +44,7 @@ def load_pan_syndrome_master() -> pd.DataFrame:
 @st.cache_data
 def load_category_to_hpo() -> pd.DataFrame:
     path = DATA_DIR / "phenotype_category_to_hpo.csv"
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, sep=None, engine="python")
     expected_cols = {"phenotype_category", "hpo_id", "hpo_term"}
     missing = expected_cols - set(df.columns)
     if missing:
@@ -76,7 +76,7 @@ def load_function2_static() -> pd.DataFrame:
                 },
             ]
         )
-    return pd.read_csv(path)
+    return pd.read_csv(path, sep=None, engine="python")
 
 
 @st.cache_data
