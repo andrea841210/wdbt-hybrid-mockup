@@ -244,7 +244,7 @@ st.caption(
 # Function 1
 # -----------------------------
 if mode == "Function 1｜HPO Translation":
-    st.header("Function 1｜兒基安泛性症狀轉譯層")
+    st.markdown("## Function 1｜兒基安泛性症狀轉譯層")
     st.info(
         "This page performs one-layer input preparation only: "
         "pan-syndrome → phenotype category → HPO list. "
