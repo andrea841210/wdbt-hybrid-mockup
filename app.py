@@ -339,8 +339,6 @@ if mode == "Function 1｜HPO Translation":
                 mime="text/csv",
             )
 
-        else:
-            st.warning("Select pan-syndrome IDs and click Run Translation.")
 
 
 # -----------------------------
