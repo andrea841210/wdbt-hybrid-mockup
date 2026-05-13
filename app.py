@@ -245,7 +245,7 @@ st.caption(
 # -----------------------------
 if mode == "Function 1｜HPO Translation":
     st.markdown("### Function 1｜兒基安泛性症狀轉譯層")
-    st.info(
+    st.caption(
         "This page performs one-layer input preparation only: "
         "pan-syndrome → phenotype category → HPO list. "
         "It does not perform interpretation, disease inference, or risk stratification."
