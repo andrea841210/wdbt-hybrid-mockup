@@ -259,7 +259,6 @@ if mode == "Function 1｜HPO Translation":
     with left:
         st.subheader("Input")
 
-        module = st.selectbox("Module", ["Neuro"], index=0)
 
         display_options = {
             f"[{row.section_code}] {row.pan_syndrome_id}｜{row.pan_syndrome_zh}": row.pan_syndrome_id
