@@ -212,7 +212,7 @@ def make_csv_download(df: pd.DataFrame) -> bytes:
 st.sidebar.title("WDBT Mockup v0.3")
 mode = st.sidebar.radio(
     "Mode",
-    ["Function 1｜Translation", "Function 2｜Static Preview"],
+    ["Function 1｜HPO Translation", "Function 2｜Risk Strata Preview"],
 )
 
 st.sidebar.caption(
@@ -243,7 +243,7 @@ st.caption(
 # -----------------------------
 # Function 1
 # -----------------------------
-if mode == "Function 1｜Translation":
+if mode == "Function 1｜HPO Translation":
     st.header("Function 1｜兒基安泛性症狀轉譯層")
     st.info(
         "This page performs one-layer input preparation only: "
