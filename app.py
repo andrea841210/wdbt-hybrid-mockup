@@ -347,7 +347,7 @@ if mode == "Function 1｜HPO Translation":
 # Function 2
 # -----------------------------
 else:
-    st.header("Function 2｜分子證據與風險分層預覽")
+    st.markdown("### Function 2｜分子證據與風險分層預覽")
     st.warning(
         "Preview only. Formal risk-stratification logic will be added after "
         "PM / bioinformatics confirmation.\n\n"
