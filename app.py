@@ -336,6 +336,7 @@ if mode == "Function 1｜HPO Translation":
                 data=make_csv_download(geneyx_ready),
                 file_name=f"{sample_id}_geneyx_ready_hpo_input.csv",
                 mime="text/csv",
+                type="primary",
             )
 
 
