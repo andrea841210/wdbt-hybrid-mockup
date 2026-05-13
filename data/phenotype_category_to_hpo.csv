@@ -1,0 +1,50 @@
+phenotype_category	hpo_id	hpo_term	needs_manual_check	note
+developmental delay concern	HP:0012758	Neurodevelopmental delay	FALSE	
+developmental delay concern	HP:0001249	Intellectual disability	FALSE	
+developmental regression concern	HP:0002376	Developmental regression	FALSE	
+fatigability / low stamina concern	HP:0003546	Exercise intolerance	FALSE	
+fatigability / low stamina concern	HP:0012378	Fatigue	FALSE	
+feeding / swallowing concern	HP:0002015	Dysphagia	FALSE	
+feeding / swallowing concern	HP:0002835	Aspiration	FALSE	
+feeding / swallowing concern	HP:0011968	Feeding difficulties	FALSE	
+gait / coordination concern	HP:0001288	Gait disturbance	FALSE	
+gait / coordination concern	HP:0011443	Abnormality of coordination	FALSE	
+gastrointestinal concern	HP:0025032	Abnormality of digestive system physiology	FALSE	
+gastrointestinal concern	HP:0011024	Abnormality of the gastrointestinal tract	FALSE	
+gastrointestinal concern	HP:0004298	Abnormality of the abdominal wall	FALSE	
+gastrointestinal concern	HP:0002012	Abnormality of the abdominal organs	FALSE	
+growth / weight concern	HP:0001510	Growth delay	FALSE	
+growth / weight concern	HP:0004325	Decreased body weight	FALSE	
+growth / weight concern	HP:0004324	Increased body weight	FALSE	
+growth / weight concern	HP:0000098	Tall stature	FALSE	
+hearing concern	HP:0000364	Hearing abnormality	FALSE	
+hematologic / bleeding concern	HP:0001892	Abnormal bleeding	FALSE	PM confirmed HPO ID / term alignment.
+hematologic / bleeding concern	HP:0001903	Anemia	FALSE	PM confirmed HPO ID / term alignment.
+hematologic / bleeding concern	HP:0000225	Gingival bleeding	FALSE	PM confirmed HPO ID / term alignment.
+hematologic / bleeding concern	HP:0011029	Internal hemorrhage	FALSE	PM confirmed HPO ID / term alignment.
+language / cognitive concern	HP:0001249	Intellectual disability	FALSE	
+language / cognitive concern	HP:0025792	Abnormal cognitive process	FALSE	
+language / cognitive concern	HP:0100543	Cognitive impairment	FALSE	
+motor weakness concern	HP:0001324	Muscle weakness	FALSE	
+musculoskeletal concern	HP:0040068	Abnormality of limb bone	FALSE	
+musculoskeletal concern	HP:0011843	Abnormal musculoskeletal physiology	FALSE	
+musculoskeletal concern	HP:0012531	Pain	FALSE	
+recurrent / unusual infection concern	HP:0010978	Abnormality of immune system physiology	FALSE	
+recurrent / unusual infection concern	HP:0032101	Unusual infection	FALSE	
+renal / urinary concern	HP:0000079	Abnormality of the urinary system	FALSE	
+renal / urinary concern	HP:0003110	Abnormality of urine homeostasis	FALSE	
+respiratory / cardiopulmonary concern	HP:0001627	Abnormal heart morphology	FALSE	
+respiratory / cardiopulmonary concern	HP:0031653	Abnormal heart valve physiology	FALSE	
+respiratory / cardiopulmonary concern	HP:0001279	Syncope	FALSE	
+respiratory concern	HP:0002795	Abnormal respiratory system physiology	FALSE	
+respiratory concern	HP:0002104	Apnea	FALSE	
+respiratory concern	HP:0012252	Abnormal respiratory system morphology	FALSE	
+systemic red flag concern	HP:0001945	Fever	FALSE	
+seizure-like event concern	HP:0001250	Seizure	FALSE	
+skin concern	HP:0000951	Abnormality of the skin	FALSE	
+skin concern	HP:0011138	Abnormal skin adnexa morphology	FALSE	
+skin concern	HP:0025276	Abnormality of skin adnexa physiology	FALSE	
+social interaction / behavioral concern	HP:0000708	Atypical behavior	FALSE	
+vision / ocular tracking concern	HP:0000597	Ophthalmoparesis	FALSE	
+vision / ocular tracking concern	HP:0000496	Abnormality of eye movement	FALSE	
+vision / ocular tracking concern	HP:0000504	Abnormality of vision	FALSE	
