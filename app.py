@@ -233,7 +233,7 @@ if pdf_path.exists():
 # -----------------------------
 # App title
 # -----------------------------
-st.markdown("## WDBT Hybrid Workflow Mockup")
+st.markdown("### WDBT Hybrid Workflow Mockup")
 st.caption(
     "Function 1: pan-syndrome → phenotype category → HPO / Geneyx-ready input. "
     "Function 2: static preview only."
