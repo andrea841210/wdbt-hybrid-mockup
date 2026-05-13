@@ -244,6 +244,7 @@ st.caption(
 # -----------------------------
 if mode == "Function 1｜HPO Translation":
     st.markdown("### Function 1｜兒基安泛性症狀轉譯層")
+    st.caption("PGSafe DB_v1 · HPO database_v1")
     st.caption(
         "This page performs one-layer input preparation only: "
         "pan-syndrome → phenotype category → HPO list. "
