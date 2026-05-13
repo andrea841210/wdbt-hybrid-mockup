@@ -1,6 +1,21 @@
-module,pan_syndrome_id,pan_syndrome_label_zh,display_order
-Neuro,PS001,"發展感覺比同齡孩子慢，例如坐、爬、站、走比較晚",1
-Neuro,PS003,"叫名字反應少，或對人互動反應比較少",2
-Neuro,PS005,"原本會的能力後來退步了",3
-Neuro,PS007,"動作協調或肌肉張力看起來不太穩定",4
-Neuro,PS009,"學習、理解或語言表達速度與同齡孩子有差異",5
+pan_syndrome_id	display_order	section_code	section_name	pan_syndrome_zh	primary_phenotype_category	secondary_phenotype_category
+PS001	1	A	發展、學習與互動	發展感覺比同齡孩子慢，例如坐、爬、站、走比較晚	developmental delay concern	motor weakness concern; musculoskeletal concern
+PS002	2	A	發展、學習與互動	說話、學習、理解指令或記憶能力疑似比同齡孩子慢	language / cognitive concern	developmental delay concern
+PS003	3	A	發展、學習與互動	叫名字反應少，或對人互動反應比較少	social interaction / behavioral concern	hearing concern
+PS004	4	A	發展、學習與互動	原本會的能力後來退步了	developmental regression concern	developmental delay concern
+PS005	5	B	抽搐、動作與肌肉	曾出現抽搐、發呆、突然僵硬或身體抖動	seizure-like event concern	gait / coordination concern
+PS006	6	B	抽搐、動作與肌肉	身體軟軟的、抱起來比較鬆，或脖子／身體撐不穩	motor weakness concern	
+PS007	7	B	抽搐、動作與肌肉	手腳沒力、容易跌倒，或走路姿勢不穩	motor weakness concern	gait / coordination concern; musculoskeletal concern
+PS008	8	B	抽搐、動作與肌肉	活動力變得比較差，或比同齡孩子更容易累	fatigability / low stamina concern	respiratory / cardiopulmonary concern
+PS009	9	C	聽覺與視覺反應	對聲音反應不太明確，或懷疑語言發展和聽力有關	hearing concern	language / cognitive concern
+PS010	10	C	聽覺與視覺反應	看東西不太追視、常斜視，或眼神不太對焦	vision / ocular tracking concern	
+PS011	11	D	吃東西、腸胃與生長	吃東西或喝奶困難，常嗆到、吐奶或吃不多	feeding / swallowing concern	gastrointestinal concern
+PS012	12	D	吃東西、腸胃與生長	體重增加不太理想，或生長速度比同齡孩子慢	growth / weight concern	feeding / swallowing concern
+PS013	13	D	吃東西、腸胃與生長	常腹瀉、便秘、腹脹或反覆嘔吐	gastrointestinal concern	growth / weight concern
+PS014	14	E	精神活力與代謝	久沒吃、生病或發燒時，精神特別差或容易嗜睡	metabolic decompensation-like concern	fatigability / low stamina concern
+PS015	15	F	呼吸與感染	呼吸容易喘，或呼吸聲大	respiratory concern	respiratory / cardiopulmonary concern; fatigability / low stamina concern
+PS016	16	F	呼吸與感染	容易反覆感染，或感染後恢復比一般孩子慢	recurrent / unusual infection concern	respiratory concern; systemic red flag concern
+PS017	17	G	出血、尿液與外觀	容易瘀青、流血不易停，或臉色常常很蒼白	hematologic / bleeding concern	fatigability / low stamina concern
+PS018	18	G	出血、尿液與外觀	尿量、尿色、喝水量異常，或反覆泌尿道感染	renal / urinary concern	recurrent / unusual infection concern; growth / weight concern
+PS019	19	G	出血、尿液與外觀	皮膚、頭髮、指甲、色斑或排汗看起來不太一樣	skin concern	
+PS020	20	H	其他需要特別注意的狀況	不明原因反覆發燒、體重下降、肚子變大、摸到腫塊，或持續骨頭／關節疼痛	systemic red flag concern; recurrent / unusual infection concern; growth / weight concern; musculoskeletal concern	
