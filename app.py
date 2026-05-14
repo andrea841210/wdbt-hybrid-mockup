@@ -1,5 +1,7 @@
 
+import csv
 import json
+from io import StringIO
 from pathlib import Path
 
 import pandas as pd
@@ -24,7 +26,7 @@ ASSET_DIR = Path("assets")
 @st.cache_data
 def load_pan_syndrome_master() -> pd.DataFrame:
     path = DATA_DIR / "pan_syndrome_master.csv"
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, sep=None, engine="python")
     expected_cols = {
         "pan_syndrome_id",
         "display_order",
@@ -44,7 +46,7 @@ def load_pan_syndrome_master() -> pd.DataFrame:
 @st.cache_data
 def load_category_to_hpo() -> pd.DataFrame:
     path = DATA_DIR / "phenotype_category_to_hpo.csv"
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, sep=None, engine="python")
     expected_cols = {"phenotype_category", "hpo_id", "hpo_term"}
     missing = expected_cols - set(df.columns)
     if missing:
@@ -76,7 +78,7 @@ def load_function2_static() -> pd.DataFrame:
                 },
             ]
         )
-    return pd.read_csv(path)
+    return pd.read_csv(path, sep=None, engine="python")
 
 
 @st.cache_data
@@ -207,144 +209,6 @@ def make_csv_download(df: pd.DataFrame) -> bytes:
 
 
 # -----------------------------
-# Sidebar
-# -----------------------------
-st.sidebar.title("WDBT Mockup v0.3")
-mode = st.sidebar.radio(
-    "Mode",
-    ["Function 1｜Translation", "Function 2｜Static Preview"],
-)
-
-st.sidebar.caption(
-    "Hybrid mockup only. Not a production system, not a clinical decision support tool."
-)
-
-pdf_path = ASSET_DIR / "WDBT_UI_all-2.pdf"
-if pdf_path.exists():
-    with open(pdf_path, "rb") as f:
-        st.sidebar.download_button(
-            "Download UI reference PDF",
-            data=f,
-            file_name="WDBT_UI_all-2.pdf",
-            mime="application/pdf",
-        )
-
-
-# -----------------------------
-# App title
-# -----------------------------
-st.title("WDBT Hybrid Workflow Mockup")
-st.caption(
-    "Function 1: pan-syndrome → phenotype category → HPO / Geneyx-ready input. "
-    "Function 2: static preview only."
-)
-
-
-# -----------------------------
-# Function 1
-# -----------------------------
-if mode == "Function 1｜Translation":
-    st.header("Function 1｜兒基安泛性症狀轉譯層")
-    st.info(
-        "This page performs one-layer input preparation only: "
-        "pan-syndrome → phenotype category → HPO list. "
-        "It does not perform interpretation, disease inference, or risk stratification."
-    )
-
-    pan_df = load_pan_syndrome_master()
-    hpo_df = load_category_to_hpo()
-
-    left, right = st.columns([1, 2])
-
-    with left:
-        st.subheader("Input")
-
-        module = st.selectbox("Module", ["Neuro"], index=0)
-
-        display_options = {
-            f"[{row.section_code}] {row.pan_syndrome_id}｜{row.pan_syndrome_zh}": row.pan_syndrome_id
-            for _, row in pan_df.iterrows()
-        }
-
-        default_labels = [
-            label
-            for label, ps_id in display_options.items()
-            if ps_id in ["PS001", "PS003", "PS005"]
-        ]
-
-        selected_labels = st.multiselect(
-            "Pan-syndrome ID",
-            options=list(display_options.keys()),
-            default=default_labels,
-        )
-        selected_ids = [display_options[label] for label in selected_labels]
-
-        physician_note = st.text_input("醫師補充描述", value="Headache")
-        top_n = st.number_input("Top N to show HPO", min_value=1, max_value=500, value=200)
-        sample_id = st.text_input("Sample ID", value="TS260508003")
-
-        run_translation = st.button("Run Translation", type="primary")
-
-    with right:
-        if not selected_ids:
-            st.warning("Please select at least one pan-syndrome item.")
-        elif run_translation:
-            selected_pan, category_expansion, hpo_mapping, geneyx_ready = build_function1_outputs(
-                selected_ids=selected_ids,
-                sample_id=sample_id,
-                pan_df=pan_df,
-                hpo_df=hpo_df,
-            )
-
-            st.subheader("1. Pan-syndrome list")
-            st.dataframe(
-                selected_pan[
-                    [
-                        "pan_syndrome_id",
-                        "section_code",
-                        "pan_syndrome_zh",
-                        "primary_phenotype_category",
-                        "secondary_phenotype_category",
-                    ]
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            st.subheader("2. Phenotype category expansion")
-            st.dataframe(
-                category_expansion,
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            st.subheader(f"3. HPO mapping preview (n={min(top_n, len(hpo_mapping))})")
-            st.dataframe(
-                hpo_mapping.head(int(top_n)),
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            st.subheader("4. Geneyx-ready HPO input package")
-            st.dataframe(
-                geneyx_ready,
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            st.download_button(
-                "Download Geneyx-ready HPO input package",
-                data=make_csv_download(geneyx_ready),
-                file_name=f"{sample_id}_geneyx_ready_hpo_input.csv",
-                mime="text/csv",
-            )
-
-        else:
-            st.warning("Select pan-syndrome IDs and click Run Translation.")
-
-
-
-# -----------------------------
 # Function 2 helpers
 # -----------------------------
 MVP_SCOPE_GENES = ["DMD", "FOLR1", "GJB2", "GRIN2B", "SCN1A"]
@@ -373,13 +237,7 @@ def parse_geneyx_tsv(uploaded_file, inheritance_bucket: str) -> tuple[dict, pd.D
     #Patient:...
     Relevance    Pathogenic    Note    Location    Gene ...
     variant rows...
-
-    Returns:
-    metadata dict + dataframe with inheritance_bucket and metadata columns added.
     """
-    import csv
-    from io import StringIO
-
     text = decode_uploaded_tsv(uploaded_file)
     lines = text.splitlines()
 
@@ -407,15 +265,11 @@ def parse_geneyx_tsv(uploaded_file, inheritance_bucket: str) -> tuple[dict, pd.D
             break
 
     if header_idx is None:
-        # Return empty table if no recognizable Geneyx header is found.
-        empty_df = pd.DataFrame()
-        return metadata, empty_df
+        return metadata, pd.DataFrame()
 
     body_text = "\n".join(lines[header_idx:]).strip()
-
     if not body_text:
-        empty_df = pd.DataFrame()
-        return metadata, empty_df
+        return metadata, pd.DataFrame()
 
     df = pd.read_csv(
         StringIO(body_text),
@@ -426,12 +280,10 @@ def parse_geneyx_tsv(uploaded_file, inheritance_bucket: str) -> tuple[dict, pd.D
         engine="python",
     )
 
-    # Remove fully empty rows if any.
     df = df.dropna(how="all")
     if df.empty:
         return metadata, df
 
-    # Add standard metadata columns.
     df.insert(0, "inheritance_bucket", inheritance_bucket)
     df.insert(0, "patient_id", metadata["patient_id"])
     df.insert(0, "analysis_id", metadata["analysis_id"])
@@ -532,6 +384,139 @@ def simplify_geneyx_candidates(df: pd.DataFrame) -> pd.DataFrame:
             out[col] = ""
 
     return out[display_cols]
+
+
+# -----------------------------
+# Sidebar
+# -----------------------------
+st.sidebar.title("WDBT Mockup v0.4")
+mode = st.sidebar.radio(
+    "Mode",
+    ["Function 1｜HPO Translation", "Function 2｜Risk Strata Preview"],
+)
+
+st.sidebar.caption(
+    "Hybrid mockup only. Not a production system, not a clinical decision support tool."
+)
+
+pdf_path = ASSET_DIR / "WDBT_UI_all-2.pdf"
+if pdf_path.exists():
+    with open(pdf_path, "rb") as f:
+        st.sidebar.download_button(
+            "Download UI reference PDF",
+            data=f,
+            file_name="WDBT_UI_all-2.pdf",
+            mime="application/pdf",
+        )
+
+
+# -----------------------------
+# App title
+# -----------------------------
+st.markdown("## WDBT Hybrid Workflow Mockup")
+st.caption(
+    "A hybrid workflow mockup for WDBT input translation and post-Geneyx risk-strata preview."
+)
+
+
+# -----------------------------
+# Function 1
+# -----------------------------
+if mode == "Function 1｜HPO Translation":
+    st.markdown("### Function 1｜兒基安泛性症狀轉譯層")
+    st.caption("PGSafe DB_v1 · HPO database_v1")
+    st.caption(
+        "Function 1 performs input preparation only: "
+        "pan-syndrome → phenotype category → HPO / Geneyx-ready input. "
+        "No interpretation, disease inference, or risk stratification is performed."
+    )
+
+    pan_df = load_pan_syndrome_master()
+    hpo_df = load_category_to_hpo()
+
+    left, right = st.columns([1, 2])
+
+    with left:
+        st.subheader("Input")
+
+        display_options = {
+            f"[{row.section_code}] {row.pan_syndrome_id}｜{row.pan_syndrome_zh}": row.pan_syndrome_id
+            for _, row in pan_df.iterrows()
+        }
+
+        default_labels = [
+            label
+            for label, ps_id in display_options.items()
+            if ps_id in ["PS001", "PS003", "PS005"]
+        ]
+
+        selected_labels = st.multiselect(
+            "Pan-syndrome ID",
+            options=list(display_options.keys()),
+            default=default_labels,
+        )
+        selected_ids = [display_options[label] for label in selected_labels]
+
+        physician_note = st.text_input("醫師補充描述", value="Headache")
+        top_n = st.number_input("Top N to show HPO", min_value=1, max_value=500, value=200)
+        sample_id = st.text_input("Sample ID", value="TS260508003")
+
+        run_translation = st.button("Run Translation", type="primary")
+
+    with right:
+        if not selected_ids:
+            st.warning("Please select at least one pan-syndrome item.")
+        elif run_translation:
+            selected_pan, category_expansion, hpo_mapping, geneyx_ready = build_function1_outputs(
+                selected_ids=selected_ids,
+                sample_id=sample_id,
+                pan_df=pan_df,
+                hpo_df=hpo_df,
+            )
+
+            st.subheader("1. Pan-syndrome list")
+            st.dataframe(
+                selected_pan[
+                    [
+                        "pan_syndrome_id",
+                        "section_code",
+                        "pan_syndrome_zh",
+                        "primary_phenotype_category",
+                        "secondary_phenotype_category",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.subheader("2. Phenotype category expansion")
+            st.dataframe(
+                category_expansion,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.subheader(f"3. HPO mapping preview (n={min(top_n, len(hpo_mapping))})")
+            st.dataframe(
+                hpo_mapping.head(int(top_n)),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.subheader("4. Geneyx-ready HPO input package")
+            st.dataframe(
+                geneyx_ready,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.download_button(
+                "Download Geneyx-ready HPO input package",
+                data=make_csv_download(geneyx_ready),
+                file_name=f"{sample_id}_geneyx_ready_hpo_input.csv",
+                mime="text/csv",
+                type="primary",
+            )
 
 
 # -----------------------------
