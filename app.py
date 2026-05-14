@@ -846,8 +846,7 @@ else:
                     hide_index=True,
                 )
 
-                st.caption("Selected phenotype categories")
-                st.write(", ".join(selected_categories) if selected_categories else "None")
+
 
                 st.subheader("2. Geneyx bucket summary")
                 st.dataframe(
