@@ -55,6 +55,28 @@ def load_category_to_hpo() -> pd.DataFrame:
 
 
 @st.cache_data
+def load_gene_disease_phenotype_map() -> pd.DataFrame:
+    path = DATA_DIR / "gene_disease_phenotype_map.csv"
+    df = pd.read_csv(path, sep=None, engine="python")
+    expected_cols = {
+        "disease_id",
+        "gene",
+        "disease_name",
+        "phenotype_concern_list",
+        "inheritance",
+        "severity",
+        "referral",
+        "possible_tiers",
+    }
+    missing = expected_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"gene_disease_phenotype_map.csv missing columns: {missing}")
+    df["gene"] = df["gene"].astype(str).str.upper().str.strip()
+    df["phenotype_concern_list"] = df["phenotype_concern_list"].fillna("")
+    return df
+
+
+@st.cache_data
 def load_function2_static() -> pd.DataFrame:
     path = DATA_DIR / "function2_risk_strata_static.csv"
     if not path.exists():
@@ -129,6 +151,23 @@ def split_categories(primary: str, secondary: str) -> list[str]:
         if cat not in seen:
             clean.append(cat)
             seen.add(cat)
+    return clean
+
+
+def split_semicolon_list(value: str) -> list[str]:
+    """
+    Split PM mapping phenotype_concern_list.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return []
+    raw = value.replace("；", ";").replace(",", ";")
+    items = [item.strip() for item in raw.split(";") if item.strip()]
+    seen = set()
+    clean = []
+    for item in items:
+        if item not in seen:
+            clean.append(item)
+            seen.add(item)
     return clean
 
 
@@ -212,6 +251,12 @@ def make_csv_download(df: pd.DataFrame) -> bytes:
 # Function 2 helpers
 # -----------------------------
 MVP_SCOPE_GENES = ["DMD", "FOLR1", "GJB2", "GRIN2B", "SCN1A"]
+RELEVANCE_HIGH_BUCKETS = [
+    "Dominant HET",
+    "Recessive Compound HET",
+    "Recessive HOM",
+    "Mitochondria",
+]
 
 
 def decode_uploaded_tsv(uploaded_file) -> str:
@@ -386,6 +431,140 @@ def simplify_geneyx_candidates(df: pd.DataFrame) -> pd.DataFrame:
     return out[display_cols]
 
 
+def build_phenotype_relevance_and_risk_preview(
+    mvp_candidates: pd.DataFrame,
+    mapping_df: pd.DataFrame,
+    selected_categories: list[str],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Connect Geneyx MVP candidates to PM gene-disease-phenotype mapping,
+    then apply MVP risk tier rules.
+    """
+    if mvp_candidates.empty:
+        columns = [
+            "risk_level",
+            "color",
+            "risk_tier",
+            "concern",
+            "phenotype_relevance",
+            "matched_phenotype_categories",
+            "gene",
+            "variant",
+            "disease_id",
+            "disease_name",
+            "inheritance_bucket",
+            "relevance",
+            "pathogenic",
+            "acmg",
+            "clinvar",
+            "severity",
+            "referral",
+            "rule_trace",
+        ]
+        return pd.DataFrame(columns=columns), pd.DataFrame(columns=columns)
+
+    selected_set = set(selected_categories)
+    rows = []
+
+    for _, variant in mvp_candidates.iterrows():
+        gene = str(variant.get("Gene", "")).upper().strip()
+        gene_maps = mapping_df[mapping_df["gene"] == gene].copy()
+
+        # If no PM mapping exists, keep the candidate but mark as out-of-map.
+        if gene_maps.empty:
+            gene_maps = pd.DataFrame(
+                [
+                    {
+                        "disease_id": "",
+                        "gene": gene,
+                        "disease_name": "",
+                        "phenotype_concern_list": "",
+                        "inheritance": "",
+                        "severity": "",
+                        "referral": "",
+                        "possible_tiers": "",
+                    }
+                ]
+            )
+
+        for _, mapping in gene_maps.iterrows():
+            phenotype_concerns = split_semicolon_list(mapping.get("phenotype_concern_list", ""))
+            matched_categories = sorted(selected_set.intersection(set(phenotype_concerns)))
+            phenotype_relevance = "Yes" if matched_categories else "No"
+
+            inheritance_bucket = str(variant.get("inheritance_bucket", ""))
+            relevance = str(variant.get("Relevance", "")).strip()
+            relevance_high = relevance.lower() == "high"
+
+            if inheritance_bucket in RELEVANCE_HIGH_BUCKETS and relevance_high:
+                if phenotype_relevance == "Yes":
+                    risk_level = 1
+                    color = "🔴 Red"
+                    risk_tier = "High Attention"
+                    rule_trace = "Relevance-high compatible bucket + phenotype relevance Yes"
+                else:
+                    risk_level = 2
+                    color = "🟠 Orange"
+                    risk_tier = "Targeted Follow-up"
+                    rule_trace = "Relevance-high compatible bucket + phenotype relevance No"
+            elif inheritance_bucket == "Recessive HET":
+                if selected_categories:
+                    risk_level = 3
+                    color = "🟡 Yellow"
+                    risk_tier = "Routine Monitoring"
+                    rule_trace = "Recessive HET + current pan-syndrome context present"
+                else:
+                    risk_level = 4
+                    color = "🔵 Blue"
+                    risk_tier = "General Awareness"
+                    rule_trace = "Recessive HET + no current pan-syndrome context"
+            else:
+                risk_level = 4
+                color = "🔵 Blue"
+                risk_tier = "General Awareness"
+                rule_trace = "No MVP rule matched"
+
+            hgvsc = str(variant.get("HGVSC", "")).strip()
+            hgvsp = str(variant.get("HGVSP", "")).strip()
+            aa = str(variant.get("AA", "")).strip()
+            variant_label = hgvsc or hgvsp or aa or str(variant.get("Location", "")).strip()
+
+            rows.append(
+                {
+                    "risk_level": risk_level,
+                    "color": color,
+                    "risk_tier": risk_tier,
+                    "concern": "; ".join(phenotype_concerns),
+                    "phenotype_relevance": phenotype_relevance,
+                    "matched_phenotype_categories": "; ".join(matched_categories),
+                    "gene": gene,
+                    "variant": variant_label,
+                    "disease_id": mapping.get("disease_id", ""),
+                    "disease_name": mapping.get("disease_name", ""),
+                    "inheritance_bucket": inheritance_bucket,
+                    "relevance": relevance,
+                    "pathogenic": variant.get("Pathogenic", ""),
+                    "acmg": variant.get("ACMG", ""),
+                    "clinvar": variant.get("ClinVar", ""),
+                    "severity": mapping.get("severity", ""),
+                    "referral": mapping.get("referral", ""),
+                    "rule_trace": rule_trace,
+                }
+            )
+
+    relevance_table = pd.DataFrame(rows)
+
+    if relevance_table.empty:
+        return relevance_table, relevance_table
+
+    risk_preview = relevance_table.sort_values(
+        by=["risk_level", "gene", "disease_id", "variant"],
+        ascending=[True, True, True, True],
+    ).reset_index(drop=True)
+
+    return relevance_table, risk_preview
+
+
 # -----------------------------
 # Sidebar
 # -----------------------------
@@ -526,15 +705,17 @@ else:
     st.markdown("### Function 2｜分子證據與風險分層預覽")
     st.caption(
         "MVP scope: DMD, FOLR1, GJB2, GRIN2B, SCN1A only. "
-        "This page parses uploaded Geneyx TSV files and prepares MVP in-scope candidate variants. "
-        "Risk-tier assignment will be added after phenotype relevance mapping is connected."
+        "This page uses uploaded Geneyx TSV files and PM-defined phenotype mapping "
+        "to generate a risk-strata preview."
     )
     st.caption(
         "本頁僅示意 MVP 範圍內之基因：DMD、FOLR1、GJB2、GRIN2B、SCN1A。"
-        "目前先解析 Geneyx TSV 並整理候選變異；正式風險分層仍待 PM mapping 與規則導入。"
+        "系統依上傳之 Geneyx TSV 與 PM 設定之 phenotype mapping 產生風險分層預覽；"
+        "本頁不代表正式解讀或臨床決策報告。"
     )
 
     pan_df = load_pan_syndrome_master()
+    mapping_df = load_gene_disease_phenotype_map()
 
     left, right = st.columns([1, 2])
 
@@ -593,7 +774,7 @@ else:
         physician_note = st.text_input("醫師補充描述", value="Headache", key="function2_note")
         sample_id = st.text_input("Sample ID", value="TS260508003", key="function2_sample")
 
-        run_parser = st.button("Run Geneyx Parser", type="primary")
+        run_preview = st.button("Run MVP Risk Preview", type="primary")
 
     with right:
         uploaded_files = {
@@ -606,10 +787,10 @@ else:
 
         missing_files = [bucket for bucket, file in uploaded_files.items() if file is None]
 
-        if run_parser:
+        if run_preview:
             if missing_files:
                 st.error(
-                    "Please upload all five Geneyx TSV files before running the parser. "
+                    "Please upload all five Geneyx TSV files before running MVP risk preview. "
                     f"Missing: {', '.join(missing_files)}"
                 )
             elif not selected_ids:
@@ -630,6 +811,11 @@ else:
 
                 bucket_summary, all_candidates, mvp_candidates = parse_all_geneyx_files(uploaded_files)
                 mvp_display = simplify_geneyx_candidates(mvp_candidates)
+                relevance_table, risk_preview = build_phenotype_relevance_and_risk_preview(
+                    mvp_candidates=mvp_candidates,
+                    mapping_df=mapping_df,
+                    selected_categories=selected_categories,
+                )
 
                 st.subheader("1. Selected pan-syndrome context")
                 st.dataframe(
@@ -664,18 +850,26 @@ else:
                     hide_index=True,
                 )
 
+                st.subheader("4. Phenotype relevance mapping")
+                st.dataframe(
+                    relevance_table,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.subheader("5. Risk strata preview")
+                st.dataframe(
+                    risk_preview,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
                 st.download_button(
-                    "Download MVP in-scope candidate variants",
-                    data=make_csv_download(mvp_display),
-                    file_name=f"{sample_id}_mvp_in_scope_geneyx_candidates.csv",
+                    "Download risk strata preview",
+                    data=make_csv_download(risk_preview),
+                    file_name=f"{sample_id}_risk_strata_preview.csv",
                     mime="text/csv",
                     type="primary",
                 )
-
-                st.subheader("4. Parser note")
-                st.info(
-                    "H4 parser completed. Phenotype relevance mapping and risk-tier assignment "
-                    "will be connected in the next step."
-                )
         else:
-            st.caption("Upload all five Geneyx TSV files, select pan-syndrome context, then run parser.")
+            st.caption("Upload all five Geneyx TSV files, select pan-syndrome context, then run MVP risk preview.")
