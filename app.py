@@ -57,7 +57,7 @@ def load_category_to_hpo() -> pd.DataFrame:
 @st.cache_data
 def load_gene_disease_phenotype_map() -> pd.DataFrame:
     path = DATA_DIR / "gene_disease_phenotype_map.csv"
-    df = pd.read_csv(path, sep=",", engine="python")
+    df = pd.read_csv(path, sep=None, engine="python")
     expected_cols = {
         "disease_id",
         "gene",
@@ -496,33 +496,37 @@ def build_phenotype_relevance_and_risk_preview(
             relevance = str(variant.get("Relevance", "")).strip()
             relevance_high = relevance.lower() == "high"
 
-            if inheritance_bucket in RELEVANCE_HIGH_BUCKETS and relevance_high:
+            # MVP v0.4 rule calibration:
+            # Geneyx "Relevance" is not consistently populated across buckets in the test files.
+            # Therefore, phenotype relevance is used as the primary MVP trigger,
+            # while Relevance is retained as a displayed evidence field rather than a hard gate.
+            if inheritance_bucket in RELEVANCE_HIGH_BUCKETS:
                 if phenotype_relevance == "Yes":
                     risk_level = 1
                     color = "🔴 Red"
                     risk_tier = "High Attention"
-                    rule_trace = "Relevance-high compatible bucket + phenotype relevance Yes"
+                    rule_trace = "Compatible bucket + phenotype relevance Yes"
                 else:
                     risk_level = 2
                     color = "🟠 Orange"
                     risk_tier = "Targeted Follow-up"
-                    rule_trace = "Relevance-high compatible bucket + phenotype relevance No"
+                    rule_trace = "Compatible bucket + phenotype relevance No"
             elif inheritance_bucket == "Recessive HET":
-                if selected_categories:
+                if phenotype_relevance == "Yes":
                     risk_level = 3
                     color = "🟡 Yellow"
                     risk_tier = "Routine Monitoring"
-                    rule_trace = "Recessive HET + current pan-syndrome context present"
+                    rule_trace = "Recessive HET + phenotype relevance Yes"
                 else:
                     risk_level = 4
                     color = "🔵 Blue"
                     risk_tier = "General Awareness"
-                    rule_trace = "Recessive HET + no current pan-syndrome context"
+                    rule_trace = "Recessive HET + phenotype relevance No"
             else:
                 risk_level = 4
                 color = "🔵 Blue"
                 risk_tier = "General Awareness"
-                rule_trace = "No MVP rule matched"
+                rule_trace = "No MVP bucket rule matched"
 
             hgvsc = str(variant.get("HGVSC", "")).strip()
             hgvsp = str(variant.get("HGVSP", "")).strip()
@@ -706,7 +710,7 @@ else:
     st.caption(
         "MVP scope: DMD, FOLR1, GJB2, GRIN2B, SCN1A only. "
         "This page uses uploaded Geneyx TSV files and PM-defined phenotype mapping "
-        "to generate a risk-strata preview."
+        "to generate a rule-based risk-strata preview."
     )
     st.caption(
         "本頁僅示意 MVP 範圍內之基因：DMD、FOLR1、GJB2、GRIN2B、SCN1A。"
