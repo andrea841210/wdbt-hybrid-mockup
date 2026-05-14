@@ -24,7 +24,7 @@ ASSET_DIR = Path("assets")
 @st.cache_data
 def load_pan_syndrome_master() -> pd.DataFrame:
     path = DATA_DIR / "pan_syndrome_master.csv"
-    df = pd.read_csv(path, sep=None, engine="python")
+    df = pd.read_csv(path)
     expected_cols = {
         "pan_syndrome_id",
         "display_order",
@@ -44,7 +44,7 @@ def load_pan_syndrome_master() -> pd.DataFrame:
 @st.cache_data
 def load_category_to_hpo() -> pd.DataFrame:
     path = DATA_DIR / "phenotype_category_to_hpo.csv"
-    df = pd.read_csv(path, sep=None, engine="python")
+    df = pd.read_csv(path)
     expected_cols = {"phenotype_category", "hpo_id", "hpo_term"}
     missing = expected_cols - set(df.columns)
     if missing:
@@ -76,7 +76,7 @@ def load_function2_static() -> pd.DataFrame:
                 },
             ]
         )
-    return pd.read_csv(path, sep=None, engine="python")
+    return pd.read_csv(path)
 
 
 @st.cache_data
@@ -212,7 +212,7 @@ def make_csv_download(df: pd.DataFrame) -> bytes:
 st.sidebar.title("WDBT Mockup v0.3")
 mode = st.sidebar.radio(
     "Mode",
-    ["Function 1｜HPO Translation", "Function 2｜Risk Strata Preview"],
+    ["Function 1｜Translation", "Function 2｜Static Preview"],
 )
 
 st.sidebar.caption(
@@ -233,19 +233,19 @@ if pdf_path.exists():
 # -----------------------------
 # App title
 # -----------------------------
-st.markdown("## WDBT Hybrid Workflow Mockup")
+st.title("WDBT Hybrid Workflow Mockup")
 st.caption(
-    "A hybrid workflow mockup for WDBT input translation and post-Geneyx risk-strata preview."
+    "Function 1: pan-syndrome → phenotype category → HPO / Geneyx-ready input. "
+    "Function 2: static preview only."
 )
 
 
 # -----------------------------
 # Function 1
 # -----------------------------
-if mode == "Function 1｜HPO Translation":
-    st.markdown("### Function 1｜兒基安泛性症狀轉譯層")
-    st.caption("PGSafe DB_v1 · HPO database_v1")
-    st.caption(
+if mode == "Function 1｜Translation":
+    st.header("Function 1｜兒基安泛性症狀轉譯層")
+    st.info(
         "This page performs one-layer input preparation only: "
         "pan-syndrome → phenotype category → HPO list. "
         "It does not perform interpretation, disease inference, or risk stratification."
@@ -259,6 +259,7 @@ if mode == "Function 1｜HPO Translation":
     with left:
         st.subheader("Input")
 
+        module = st.selectbox("Module", ["Neuro"], index=0)
 
         display_options = {
             f"[{row.section_code}] {row.pan_syndrome_id}｜{row.pan_syndrome_zh}": row.pan_syndrome_id
@@ -336,9 +337,201 @@ if mode == "Function 1｜HPO Translation":
                 data=make_csv_download(geneyx_ready),
                 file_name=f"{sample_id}_geneyx_ready_hpo_input.csv",
                 mime="text/csv",
-                type="primary",
             )
 
+        else:
+            st.warning("Select pan-syndrome IDs and click Run Translation.")
+
+
+
+# -----------------------------
+# Function 2 helpers
+# -----------------------------
+MVP_SCOPE_GENES = ["DMD", "FOLR1", "GJB2", "GRIN2B", "SCN1A"]
+
+
+def decode_uploaded_tsv(uploaded_file) -> str:
+    """
+    Decode uploaded TSV bytes with common encodings.
+    """
+    raw = uploaded_file.getvalue()
+    for encoding in ["utf-8-sig", "utf-8", "big5", "latin1"]:
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def parse_geneyx_tsv(uploaded_file, inheritance_bucket: str) -> tuple[dict, pd.DataFrame]:
+    """
+    Parse one Geneyx TSV file.
+
+    Expected structure:
+    #Main Sample:...
+    #Analysis:...
+    #Patient:...
+    Relevance    Pathogenic    Note    Location    Gene ...
+    variant rows...
+
+    Returns:
+    metadata dict + dataframe with inheritance_bucket and metadata columns added.
+    """
+    import csv
+    from io import StringIO
+
+    text = decode_uploaded_tsv(uploaded_file)
+    lines = text.splitlines()
+
+    metadata = {
+        "sample_id": "",
+        "analysis_id": "",
+        "patient_id": "",
+        "inheritance_bucket": inheritance_bucket,
+    }
+
+    header_idx = None
+
+    for idx, line in enumerate(lines):
+        clean_line = line.strip()
+
+        if clean_line.startswith("#Main Sample:"):
+            metadata["sample_id"] = clean_line.replace("#Main Sample:", "", 1).strip()
+        elif clean_line.startswith("#Analysis:"):
+            metadata["analysis_id"] = clean_line.replace("#Analysis:", "", 1).strip()
+        elif clean_line.startswith("#Patient:"):
+            metadata["patient_id"] = clean_line.replace("#Patient:", "", 1).strip()
+
+        if clean_line.startswith("Relevance\tPathogenic\t"):
+            header_idx = idx
+            break
+
+    if header_idx is None:
+        # Return empty table if no recognizable Geneyx header is found.
+        empty_df = pd.DataFrame()
+        return metadata, empty_df
+
+    body_text = "\n".join(lines[header_idx:]).strip()
+
+    if not body_text:
+        empty_df = pd.DataFrame()
+        return metadata, empty_df
+
+    df = pd.read_csv(
+        StringIO(body_text),
+        sep="\t",
+        dtype=str,
+        keep_default_na=False,
+        quoting=csv.QUOTE_NONE,
+        engine="python",
+    )
+
+    # Remove fully empty rows if any.
+    df = df.dropna(how="all")
+    if df.empty:
+        return metadata, df
+
+    # Add standard metadata columns.
+    df.insert(0, "inheritance_bucket", inheritance_bucket)
+    df.insert(0, "patient_id", metadata["patient_id"])
+    df.insert(0, "analysis_id", metadata["analysis_id"])
+    df.insert(0, "sample_id", metadata["sample_id"])
+
+    return metadata, df
+
+
+def parse_all_geneyx_files(uploaded_files: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Parse all required Geneyx TSV files.
+
+    Returns:
+    bucket_summary
+    all_candidates
+    mvp_in_scope_candidates
+    """
+    all_tables = []
+    summary_rows = []
+
+    for bucket, uploaded_file in uploaded_files.items():
+        metadata, df = parse_geneyx_tsv(uploaded_file, bucket)
+
+        variant_count = len(df) if not df.empty else 0
+        summary_rows.append(
+            {
+                "inheritance_bucket": bucket,
+                "sample_id": metadata.get("sample_id", ""),
+                "analysis_id": metadata.get("analysis_id", ""),
+                "patient_id": metadata.get("patient_id", ""),
+                "variant_count": variant_count,
+                "status": "has variants" if variant_count > 0 else "no call-out",
+            }
+        )
+
+        if variant_count > 0:
+            all_tables.append(df)
+
+    bucket_summary = pd.DataFrame(summary_rows)
+
+    if not all_tables:
+        all_candidates = pd.DataFrame()
+        mvp_candidates = pd.DataFrame()
+        return bucket_summary, all_candidates, mvp_candidates
+
+    all_candidates = pd.concat(all_tables, ignore_index=True)
+
+    if "Gene" not in all_candidates.columns:
+        mvp_candidates = pd.DataFrame()
+    else:
+        mvp_candidates = all_candidates[
+            all_candidates["Gene"].astype(str).str.upper().isin(MVP_SCOPE_GENES)
+        ].copy()
+
+    return bucket_summary, all_candidates, mvp_candidates
+
+
+def simplify_geneyx_candidates(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Reduce Geneyx candidate table to Function 2 display columns.
+    Missing columns are kept as empty strings.
+    """
+    display_cols = [
+        "sample_id",
+        "analysis_id",
+        "patient_id",
+        "inheritance_bucket",
+        "Relevance",
+        "Pathogenic",
+        "Gene",
+        "Location",
+        "Omim",
+        "Omim Inheritance",
+        "AA",
+        "HGVSC",
+        "HGVSP",
+        "Zygosity",
+        "RefSeq",
+        "dbSNP",
+        "ACMG",
+        "ClinVar",
+        "Effect",
+        "Severity",
+        "Max AF",
+        "CADD Phred",
+        "SpliceAi Score",
+        "Phenotype",
+        "Matched Phenotypes",
+        "Filter",
+    ]
+
+    if df.empty:
+        return pd.DataFrame(columns=display_cols)
+
+    out = df.copy()
+    for col in display_cols:
+        if col not in out.columns:
+            out[col] = ""
+
+    return out[display_cols]
 
 
 # -----------------------------
@@ -346,26 +539,52 @@ if mode == "Function 1｜HPO Translation":
 # -----------------------------
 else:
     st.markdown("### Function 2｜分子證據與風險分層預覽")
-    st.warning(
-        "Preview only. Formal risk-stratification logic will be added after "
-        "PM / bioinformatics confirmation.\n\n"
-        "本頁僅為示意預覽；正式風險分層邏輯待 PM / 生資確認後導入。"
+    st.caption(
+        "MVP scope: DMD, FOLR1, GJB2, GRIN2B, SCN1A only. "
+        "This page parses uploaded Geneyx TSV files and prepares MVP in-scope candidate variants. "
+        "Risk-tier assignment will be added after phenotype relevance mapping is connected."
+    )
+    st.caption(
+        "本頁僅示意 MVP 範圍內之基因：DMD、FOLR1、GJB2、GRIN2B、SCN1A。"
+        "目前先解析 Geneyx TSV 並整理候選變異；正式風險分層仍待 PM mapping 與規則導入。"
     )
 
     pan_df = load_pan_syndrome_master()
-    risk_df = load_function2_static()
-    reporting_mock = load_reporting_package_mock()
 
     left, right = st.columns([1, 2])
 
     with left:
         st.subheader("Input")
 
-        uploaded_file = st.file_uploader(
-            "Geneyx output file",
-            type=["csv", "xlsx", "xls"],
-            help="Static preview only. Uploaded file is not processed in v0.3.",
+        st.markdown("**Upload Geneyx TSV files**")
+
+        dominant_het_file = st.file_uploader(
+            "Dominant HET.tsv",
+            type=["tsv", "txt"],
+            key="dominant_het_file",
         )
+        mitochondria_file = st.file_uploader(
+            "Mitochondria.tsv",
+            type=["tsv", "txt"],
+            key="mitochondria_file",
+        )
+        recessive_compound_het_file = st.file_uploader(
+            "Recessive Compound HET.tsv",
+            type=["tsv", "txt"],
+            key="recessive_compound_het_file",
+        )
+        recessive_het_file = st.file_uploader(
+            "Recessive HET.tsv",
+            type=["tsv", "txt"],
+            key="recessive_het_file",
+        )
+        recessive_hom_file = st.file_uploader(
+            "Recessive HOM.tsv",
+            type=["tsv", "txt"],
+            key="recessive_hom_file",
+        )
+
+        st.markdown("---")
 
         display_options = {
             f"[{row.section_code}] {row.pan_syndrome_id}｜{row.pan_syndrome_zh}": row.pan_syndrome_id
@@ -388,42 +607,90 @@ else:
 
         physician_note = st.text_input("醫師補充描述", value="Headache", key="function2_note")
         sample_id = st.text_input("Sample ID", value="TS260508003", key="function2_sample")
-        show_preview = st.button("Show Static Preview", type="primary")
+
+        run_parser = st.button("Run Geneyx Parser", type="primary")
 
     with right:
-        if show_preview:
-            selected_pan = pan_df[pan_df["pan_syndrome_id"].isin(selected_ids)].copy()
+        uploaded_files = {
+            "Dominant HET": dominant_het_file,
+            "Mitochondria": mitochondria_file,
+            "Recessive Compound HET": recessive_compound_het_file,
+            "Recessive HET": recessive_het_file,
+            "Recessive HOM": recessive_hom_file,
+        }
 
-            st.subheader("1. Pan-syndrome list recall")
-            st.dataframe(
-                selected_pan[
-                    [
-                        "pan_syndrome_id",
-                        "section_code",
-                        "pan_syndrome_zh",
-                        "primary_phenotype_category",
-                        "secondary_phenotype_category",
-                    ]
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
+        missing_files = [bucket for bucket, file in uploaded_files.items() if file is None]
 
-            st.subheader("2. Risk strata ranking")
-            st.dataframe(
-                risk_df,
-                use_container_width=True,
-                hide_index=True,
-            )
+        if run_parser:
+            if missing_files:
+                st.error(
+                    "Please upload all five Geneyx TSV files before running the parser. "
+                    f"Missing: {', '.join(missing_files)}"
+                )
+            elif not selected_ids:
+                st.warning("Please select at least one pan-syndrome item.")
+            else:
+                selected_pan = pan_df[pan_df["pan_syndrome_id"].isin(selected_ids)].copy()
+                selected_categories = []
 
-            st.subheader("3. Reporting package output")
-            st.json(reporting_mock)
+                for _, row in selected_pan.iterrows():
+                    selected_categories.extend(
+                        split_categories(
+                            row["primary_phenotype_category"],
+                            row["secondary_phenotype_category"],
+                        )
+                    )
 
-            st.download_button(
-                "Download reporting package mock JSON",
-                data=json.dumps(reporting_mock, ensure_ascii=False, indent=2).encode("utf-8"),
-                file_name=f"{sample_id}_reporting_package_mock.json",
-                mime="application/json",
-            )
+                selected_categories = sorted(set(selected_categories))
+
+                bucket_summary, all_candidates, mvp_candidates = parse_all_geneyx_files(uploaded_files)
+                mvp_display = simplify_geneyx_candidates(mvp_candidates)
+
+                st.subheader("1. Selected pan-syndrome context")
+                st.dataframe(
+                    selected_pan[
+                        [
+                            "pan_syndrome_id",
+                            "section_code",
+                            "pan_syndrome_zh",
+                            "primary_phenotype_category",
+                            "secondary_phenotype_category",
+                        ]
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.caption("Selected phenotype categories")
+                st.write(", ".join(selected_categories) if selected_categories else "None")
+
+                st.subheader("2. Geneyx bucket summary")
+                st.dataframe(
+                    bucket_summary,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.subheader("3. MVP in-scope candidate variants")
+                st.caption("MVP scope genes: DMD, FOLR1, GJB2, GRIN2B, SCN1A.")
+                st.dataframe(
+                    mvp_display,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.download_button(
+                    "Download MVP in-scope candidate variants",
+                    data=make_csv_download(mvp_display),
+                    file_name=f"{sample_id}_mvp_in_scope_geneyx_candidates.csv",
+                    mime="text/csv",
+                    type="primary",
+                )
+
+                st.subheader("4. Parser note")
+                st.info(
+                    "H4 parser completed. Phenotype relevance mapping and risk-tier assignment "
+                    "will be connected in the next step."
+                )
         else:
-            st.warning("Click Show Static Preview to display the static completed-flow preview.")
+            st.caption("Upload all five Geneyx TSV files, select pan-syndrome context, then run parser.")
