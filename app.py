@@ -57,7 +57,7 @@ def load_category_to_hpo() -> pd.DataFrame:
 @st.cache_data
 def load_gene_disease_phenotype_map() -> pd.DataFrame:
     path = DATA_DIR / "gene_disease_phenotype_map.csv"
-    df = pd.read_csv(path, sep=None, engine="python")
+    df = pd.read_csv(path, sep=",", engine="python")
     expected_cols = {
         "disease_id",
         "gene",
