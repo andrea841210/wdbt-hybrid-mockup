@@ -337,14 +337,34 @@ def parse_geneyx_tsv(uploaded_file, inheritance_bucket: str) -> tuple[dict, pd.D
     return metadata, df
 
 
-def parse_all_geneyx_files(uploaded_files: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def is_geneyx_interpreted_candidate(df: pd.DataFrame) -> pd.Series:
+    """
+    Geneyx already performs an AI/HPO-based interpretation layer.
+
+    Function 2 decision tree should only use rows where both:
+    - Relevance is not blank
+    - Pathogenic is not blank
+
+    Blank Relevance / Pathogenic means the variant was not selected by Geneyx
+    for downstream risk-tier preview.
+    """
+    if df.empty or "Relevance" not in df.columns or "Pathogenic" not in df.columns:
+        return pd.Series(False, index=df.index)
+
+    relevance_filled = df["Relevance"].astype(str).str.strip() != ""
+    pathogenic_filled = df["Pathogenic"].astype(str).str.strip() != ""
+    return relevance_filled & pathogenic_filled
+
+
+def parse_all_geneyx_files(uploaded_files: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Parse all required Geneyx TSV files.
 
     Returns:
     bucket_summary
     all_candidates
-    mvp_in_scope_candidates
+    interpreted_candidates
+    mvp_interpreted_candidates
     """
     all_tables = []
     summary_rows = []
@@ -352,44 +372,58 @@ def parse_all_geneyx_files(uploaded_files: dict) -> tuple[pd.DataFrame, pd.DataF
     for bucket, uploaded_file in uploaded_files.items():
         metadata, df = parse_geneyx_tsv(uploaded_file, bucket)
 
-        variant_count = len(df) if not df.empty else 0
+        raw_variant_count = len(df) if not df.empty else 0
+
+        if raw_variant_count > 0:
+            interpreted_mask = is_geneyx_interpreted_candidate(df)
+            interpreted_count = int(interpreted_mask.sum())
+        else:
+            interpreted_count = 0
+
         summary_rows.append(
             {
                 "inheritance_bucket": bucket,
                 "sample_id": metadata.get("sample_id", ""),
                 "analysis_id": metadata.get("analysis_id", ""),
                 "patient_id": metadata.get("patient_id", ""),
-                "variant_count": variant_count,
-                "status": "has variants" if variant_count > 0 else "no call-out",
+                "raw_variant_count": raw_variant_count,
+                "interpreted_variant_count": interpreted_count,
+                "status": "has interpreted variants" if interpreted_count > 0 else "no interpreted call-out",
             }
         )
 
-        if variant_count > 0:
+        if raw_variant_count > 0:
             all_tables.append(df)
 
     bucket_summary = pd.DataFrame(summary_rows)
 
     if not all_tables:
         all_candidates = pd.DataFrame()
-        mvp_candidates = pd.DataFrame()
-        return bucket_summary, all_candidates, mvp_candidates
+        interpreted_candidates = pd.DataFrame()
+        mvp_interpreted_candidates = pd.DataFrame()
+        return bucket_summary, all_candidates, interpreted_candidates, mvp_interpreted_candidates
 
     all_candidates = pd.concat(all_tables, ignore_index=True)
 
-    if "Gene" not in all_candidates.columns:
-        mvp_candidates = pd.DataFrame()
+    interpreted_mask = is_geneyx_interpreted_candidate(all_candidates)
+    interpreted_candidates = all_candidates[interpreted_mask].copy()
+
+    if interpreted_candidates.empty or "Gene" not in interpreted_candidates.columns:
+        mvp_interpreted_candidates = pd.DataFrame()
     else:
-        mvp_candidates = all_candidates[
-            all_candidates["Gene"].astype(str).str.upper().isin(MVP_SCOPE_GENES)
+        mvp_interpreted_candidates = interpreted_candidates[
+            interpreted_candidates["Gene"].astype(str).str.upper().isin(MVP_SCOPE_GENES)
         ].copy()
 
-    return bucket_summary, all_candidates, mvp_candidates
+    return bucket_summary, all_candidates, interpreted_candidates, mvp_interpreted_candidates
 
 
 def simplify_geneyx_candidates(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Reduce Geneyx candidate table to Function 2 display columns.
-    Missing columns are kept as empty strings.
+    Reduce Geneyx interpreted candidate table to Function 2 decision-tree input columns.
+
+    Function 2 only uses Geneyx-interpreted rows and the following fields:
+    Relevance, Pathogenic, Gene, HGVSC, HGVSP, Zygosity.
     """
     display_cols = [
         "sample_id",
@@ -399,25 +433,9 @@ def simplify_geneyx_candidates(df: pd.DataFrame) -> pd.DataFrame:
         "Relevance",
         "Pathogenic",
         "Gene",
-        "Location",
-        "Omim",
-        "Omim Inheritance",
-        "AA",
         "HGVSC",
         "HGVSP",
         "Zygosity",
-        "RefSeq",
-        "dbSNP",
-        "ACMG",
-        "ClinVar",
-        "Effect",
-        "Severity",
-        "Max AF",
-        "CADD Phred",
-        "SpliceAi Score",
-        "Phenotype",
-        "Matched Phenotypes",
-        "Filter",
     ]
 
     if df.empty:
@@ -455,8 +473,6 @@ def build_phenotype_relevance_and_risk_preview(
             "inheritance_bucket",
             "relevance",
             "pathogenic",
-            "acmg",
-            "clinvar",
             "severity",
             "referral",
             "rule_trace",
@@ -496,32 +512,32 @@ def build_phenotype_relevance_and_risk_preview(
             relevance = str(variant.get("Relevance", "")).strip()
             relevance_high = relevance.lower() == "high"
 
-            # MVP v0.4 rule calibration:
-            # Geneyx "Relevance" is not consistently populated across buckets in the test files.
-            # Therefore, phenotype relevance is used as the primary MVP trigger,
-            # while Relevance is retained as a displayed evidence field rather than a hard gate.
+            # MVP v0.4 interpreted-candidate rule:
+            # Only rows with both Relevance and Pathogenic values reach this function.
+            # Blank Relevance / Pathogenic rows were already filtered out because they
+            # were not selected by Geneyx's AI/HPO-based interpretation layer.
             if inheritance_bucket in RELEVANCE_HIGH_BUCKETS:
                 if phenotype_relevance == "Yes":
                     risk_level = 1
                     color = "🔴 Red"
                     risk_tier = "High Attention"
-                    rule_trace = "Compatible bucket + phenotype relevance Yes"
+                    rule_trace = "Interpreted compatible bucket + phenotype relevance Yes"
                 else:
                     risk_level = 2
                     color = "🟠 Orange"
                     risk_tier = "Targeted Follow-up"
-                    rule_trace = "Compatible bucket + phenotype relevance No"
+                    rule_trace = "Interpreted compatible bucket + phenotype relevance No"
             elif inheritance_bucket == "Recessive HET":
                 if phenotype_relevance == "Yes":
                     risk_level = 3
                     color = "🟡 Yellow"
                     risk_tier = "Routine Monitoring"
-                    rule_trace = "Recessive HET + phenotype relevance Yes"
+                    rule_trace = "Interpreted Recessive HET + phenotype relevance Yes"
                 else:
                     risk_level = 4
                     color = "🔵 Blue"
                     risk_tier = "General Awareness"
-                    rule_trace = "Recessive HET + phenotype relevance No"
+                    rule_trace = "Interpreted Recessive HET + phenotype relevance No"
             else:
                 risk_level = 4
                 color = "🔵 Blue"
@@ -548,8 +564,6 @@ def build_phenotype_relevance_and_risk_preview(
                     "inheritance_bucket": inheritance_bucket,
                     "relevance": relevance,
                     "pathogenic": variant.get("Pathogenic", ""),
-                    "acmg": variant.get("ACMG", ""),
-                    "clinvar": variant.get("ClinVar", ""),
                     "severity": mapping.get("severity", ""),
                     "referral": mapping.get("referral", ""),
                     "rule_trace": rule_trace,
@@ -709,12 +723,12 @@ else:
     st.markdown("### Function 2｜分子證據與風險分層預覽")
     st.caption(
         "MVP scope: DMD, FOLR1, GJB2, GRIN2B, SCN1A only. "
-        "This page uses uploaded Geneyx TSV files and PM-defined phenotype mapping "
-        "to generate a rule-based risk-strata preview."
+        "This page uses Geneyx-interpreted rows only: Relevance and Pathogenic must both be filled. "
+        "PM-defined phenotype mapping is then used to generate a rule-based risk-strata preview."
     )
     st.caption(
         "本頁僅示意 MVP 範圍內之基因：DMD、FOLR1、GJB2、GRIN2B、SCN1A。"
-        "系統依上傳之 Geneyx TSV 與 PM 設定之 phenotype mapping 產生風險分層預覽；"
+        "系統僅使用 Geneyx 已標註 Relevance 與 Pathogenic 的列，並結合 PM 設定之 phenotype mapping 產生風險分層預覽；"
         "本頁不代表正式解讀或臨床決策報告。"
     )
 
@@ -813,7 +827,7 @@ else:
 
                 selected_categories = sorted(set(selected_categories))
 
-                bucket_summary, all_candidates, mvp_candidates = parse_all_geneyx_files(uploaded_files)
+                bucket_summary, all_candidates, interpreted_candidates, mvp_candidates = parse_all_geneyx_files(uploaded_files)
                 mvp_display = simplify_geneyx_candidates(mvp_candidates)
                 relevance_table, risk_preview = build_phenotype_relevance_and_risk_preview(
                     mvp_candidates=mvp_candidates,
@@ -846,8 +860,8 @@ else:
                     hide_index=True,
                 )
 
-                st.subheader("3. MVP in-scope candidate variants")
-                st.caption("MVP scope genes: DMD, FOLR1, GJB2, GRIN2B, SCN1A.")
+                st.subheader("3. MVP interpreted Geneyx candidates")
+                st.caption("Only rows with both Relevance and Pathogenic values are shown. MVP scope genes: DMD, FOLR1, GJB2, GRIN2B, SCN1A.")
                 st.dataframe(
                     mvp_display,
                     use_container_width=True,
