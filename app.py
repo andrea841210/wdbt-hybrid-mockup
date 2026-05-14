@@ -885,5 +885,4 @@ else:
                     mime="text/csv",
                     type="primary",
                 )
-        else:
-            st.caption("Upload all five Geneyx TSV files, select pan-syndrome context, then run MVP risk preview.")
+
