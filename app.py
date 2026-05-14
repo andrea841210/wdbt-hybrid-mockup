@@ -726,11 +726,7 @@ else:
         "This page uses Geneyx-interpreted rows only: Relevance and Pathogenic must both be filled. "
         "PM-defined phenotype mapping is then used to generate a rule-based risk-strata preview."
     )
-    st.caption(
-        "本頁僅示意 MVP 範圍內之基因：DMD、FOLR1、GJB2、GRIN2B、SCN1A。"
-        "系統僅使用 Geneyx 已標註 Relevance 與 Pathogenic 的列，並結合 PM 設定之 phenotype mapping 產生風險分層預覽；"
-        "本頁不代表正式解讀或臨床決策報告。"
-    )
+
 
     pan_df = load_pan_syndrome_master()
     mapping_df = load_gene_disease_phenotype_map()
