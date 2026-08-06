@@ -1,6 +1,7 @@
 
 import csv
 import json
+import re
 from io import StringIO
 from pathlib import Path
 
@@ -23,10 +24,28 @@ ASSET_DIR = Path("assets")
 # -----------------------------
 # Data loading helpers
 # -----------------------------
+def read_csv_with_encoding_fallback(path: Path, **read_csv_kwargs) -> pd.DataFrame:
+    """Read a local CSV with a deterministic encoding fallback."""
+    raw = path.read_bytes()
+    for encoding in ("utf-8-sig", "utf-8", "cp950", "big5"):
+        try:
+            text = raw.decode(encoding)
+            return pd.read_csv(StringIO(text), **read_csv_kwargs)
+        except UnicodeDecodeError:
+            continue
+    raise ValueError(f"Unable to decode CSV: {path.name}")
+
+
 @st.cache_data
 def load_pan_syndrome_master() -> pd.DataFrame:
     path = DATA_DIR / "pan_syndrome_master.csv"
-    df = pd.read_csv(path, sep=None, engine="python")
+    df = read_csv_with_encoding_fallback(
+        path,
+        sep=None,
+        engine="python",
+        dtype=str,
+        keep_default_na=False,
+    )
     expected_cols = {
         "pan_syndrome_id",
         "display_order",
@@ -40,6 +59,7 @@ def load_pan_syndrome_master() -> pd.DataFrame:
     if missing:
         raise ValueError(f"pan_syndrome_master.csv missing columns: {missing}")
     df["secondary_phenotype_category"] = df["secondary_phenotype_category"].fillna("")
+    df["display_order"] = pd.to_numeric(df["display_order"], errors="raise")
     return df.sort_values("display_order")
 
 
@@ -57,22 +77,41 @@ def load_category_to_hpo() -> pd.DataFrame:
 @st.cache_data
 def load_gene_disease_phenotype_map() -> pd.DataFrame:
     path = DATA_DIR / "gene_disease_phenotype_map.csv"
-    df = pd.read_csv(path, sep=",", engine="python")
-    expected_cols = {
+    df = read_csv_with_encoding_fallback(
+        path,
+        sep=",",
+        engine="python",
+        dtype=str,
+        keep_default_na=False,
+    )
+    canonical_cols = [
         "disease_id",
         "gene",
         "disease_name",
+        "omim_id",
         "phenotype_concern_list",
         "inheritance",
-        "severity",
-        "referral",
-        "possible_tiers",
-    }
+    ]
+    expected_cols = set(canonical_cols)
     missing = expected_cols - set(df.columns)
     if missing:
         raise ValueError(f"gene_disease_phenotype_map.csv missing columns: {missing}")
-    df["gene"] = df["gene"].astype(str).str.upper().str.strip()
-    df["phenotype_concern_list"] = df["phenotype_concern_list"].fillna("")
+    df = df[canonical_cols].copy()
+    for col in canonical_cols:
+        df[col] = df[col].astype(str).str.strip()
+    df["gene"] = df["gene"].str.upper()
+
+    required_nonblank = [
+        "disease_id",
+        "gene",
+        "disease_name",
+        "omim_id",
+        "phenotype_concern_list",
+    ]
+    blank_counts = {col: int((df[col] == "").sum()) for col in required_nonblank}
+    blank_counts = {col: count for col, count in blank_counts.items() if count}
+    if blank_counts:
+        raise ValueError(f"gene_disease_phenotype_map.csv blank required values: {blank_counts}")
     return df
 
 
@@ -250,13 +289,13 @@ def make_csv_download(df: pd.DataFrame) -> bytes:
 # -----------------------------
 # Function 2 helpers
 # -----------------------------
-MVP_SCOPE_GENES = ["DMD", "FOLR1", "GJB2", "GRIN2B", "SCN1A"]
 RELEVANCE_HIGH_BUCKETS = [
     "Dominant HET",
     "Recessive Compound HET",
     "Recessive HOM",
     "Mitochondria",
 ]
+P_LP_CLASSIFICATIONS = {"pathogenic", "likelypathogenic"}
 
 
 def decode_uploaded_tsv(uploaded_file) -> str:
@@ -264,7 +303,7 @@ def decode_uploaded_tsv(uploaded_file) -> str:
     Decode uploaded TSV bytes with common encodings.
     """
     raw = uploaded_file.getvalue()
-    for encoding in ["utf-8-sig", "utf-8", "big5", "latin1"]:
+    for encoding in ["utf-8-sig", "utf-8", "cp950", "big5", "latin1"]:
         try:
             return raw.decode(encoding)
         except UnicodeDecodeError:
@@ -337,34 +376,42 @@ def parse_geneyx_tsv(uploaded_file, inheritance_bucket: str) -> tuple[dict, pd.D
     return metadata, df
 
 
+def normalize_pathogenicity(value: str) -> str:
+    """Normalize Geneyx pathogenicity labels for exact P/LP matching."""
+    return re.sub(r"[^a-z]", "", str(value).lower())
+
+
 def is_geneyx_interpreted_candidate(df: pd.DataFrame) -> pd.Series:
     """
     Geneyx already performs an AI/HPO-based interpretation layer.
 
     Function 2 decision tree should only use rows where both:
     - Relevance is not blank
-    - Pathogenic is not blank
+    - Pathogenic is exactly Pathogenic or Likely Pathogenic after normalization
 
-    Blank Relevance / Pathogenic means the variant was not selected by Geneyx
-    for downstream risk-tier preview.
+    Other values such as VUS/UncertainSignificance, Benign, or a merely
+    non-blank value must not enter risk stratification.
     """
     if df.empty or "Relevance" not in df.columns or "Pathogenic" not in df.columns:
         return pd.Series(False, index=df.index)
 
     relevance_filled = df["Relevance"].astype(str).str.strip() != ""
-    pathogenic_filled = df["Pathogenic"].astype(str).str.strip() != ""
-    return relevance_filled & pathogenic_filled
+    pathogenic_is_plp = df["Pathogenic"].map(normalize_pathogenicity).isin(
+        P_LP_CLASSIFICATIONS
+    )
+    return relevance_filled & pathogenic_is_plp
 
 
-def parse_all_geneyx_files(uploaded_files: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def parse_all_geneyx_files(
+    uploaded_files: dict,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Parse all required Geneyx TSV files.
 
     Returns:
     bucket_summary
     all_candidates
-    interpreted_candidates
-    mvp_interpreted_candidates
+    interpreted_plp_candidates
     """
     all_tables = []
     summary_rows = []
@@ -387,8 +434,8 @@ def parse_all_geneyx_files(uploaded_files: dict) -> tuple[pd.DataFrame, pd.DataF
                 "analysis_id": metadata.get("analysis_id", ""),
                 "patient_id": metadata.get("patient_id", ""),
                 "raw_variant_count": raw_variant_count,
-                "interpreted_variant_count": interpreted_count,
-                "status": "has interpreted variants" if interpreted_count > 0 else "no interpreted call-out",
+                "interpreted_plp_count": interpreted_count,
+                "status": "has interpreted P/LP" if interpreted_count > 0 else "no interpreted P/LP",
             }
         )
 
@@ -400,30 +447,40 @@ def parse_all_geneyx_files(uploaded_files: dict) -> tuple[pd.DataFrame, pd.DataF
     if not all_tables:
         all_candidates = pd.DataFrame()
         interpreted_candidates = pd.DataFrame()
-        mvp_interpreted_candidates = pd.DataFrame()
-        return bucket_summary, all_candidates, interpreted_candidates, mvp_interpreted_candidates
+        return bucket_summary, all_candidates, interpreted_candidates
 
     all_candidates = pd.concat(all_tables, ignore_index=True)
 
     interpreted_mask = is_geneyx_interpreted_candidate(all_candidates)
     interpreted_candidates = all_candidates[interpreted_mask].copy()
 
-    if interpreted_candidates.empty or "Gene" not in interpreted_candidates.columns:
-        mvp_interpreted_candidates = pd.DataFrame()
-    else:
-        mvp_interpreted_candidates = interpreted_candidates[
-            interpreted_candidates["Gene"].astype(str).str.upper().isin(MVP_SCOPE_GENES)
-        ].copy()
+    return bucket_summary, all_candidates, interpreted_candidates
 
-    return bucket_summary, all_candidates, interpreted_candidates, mvp_interpreted_candidates
+
+def split_mapping_coverage(
+    interpreted_candidates: pd.DataFrame,
+    mapping_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split P/LP candidates by whether the active disease map contains the gene."""
+    if interpreted_candidates.empty or "Gene" not in interpreted_candidates.columns:
+        return pd.DataFrame(), interpreted_candidates.copy()
+
+    active_genes = set(mapping_df["gene"].astype(str).str.upper().str.strip())
+    covered_mask = (
+        interpreted_candidates["Gene"].astype(str).str.upper().str.strip().isin(active_genes)
+    )
+    return (
+        interpreted_candidates[covered_mask].copy(),
+        interpreted_candidates[~covered_mask].copy(),
+    )
 
 
 def simplify_geneyx_candidates(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Reduce Geneyx interpreted candidate table to Function 2 decision-tree input columns.
+    Reduce Geneyx interpreted P/LP candidates to traceable input columns.
 
-    Function 2 only uses Geneyx-interpreted rows and the following fields:
-    Relevance, Pathogenic, Gene, HGVSC, HGVSP, Zygosity.
+    The inheritance bucket comes from the uploaded Geneyx TSV filename and is
+    the inheritance-mode input used by the decision tree.
     """
     display_cols = [
         "sample_id",
@@ -436,6 +493,7 @@ def simplify_geneyx_candidates(df: pd.DataFrame) -> pd.DataFrame:
         "HGVSC",
         "HGVSP",
         "Zygosity",
+        "ACMG",
     ]
 
     if df.empty:
@@ -449,16 +507,82 @@ def simplify_geneyx_candidates(df: pd.DataFrame) -> pd.DataFrame:
     return out[display_cols]
 
 
+def build_selected_category_context(
+    selected_pan: pd.DataFrame,
+) -> tuple[list[str], dict[str, list[str]]]:
+    """
+    Merge primary and secondary categories with equal decision-tree weight.
+
+    Source labels are retained for QA trace only; they never change the tier.
+    """
+    selected_categories = []
+    category_sources: dict[str, list[str]] = {}
+
+    ordered_pan = selected_pan.sort_values("display_order")
+    for _, row in ordered_pan.iterrows():
+        ps_id = str(row.get("pan_syndrome_id", "")).strip()
+        for field, source_type in (
+            ("primary_phenotype_category", "primary"),
+            ("secondary_phenotype_category", "secondary"),
+        ):
+            for category in split_semicolon_list(row.get(field, "")):
+                if category not in category_sources:
+                    selected_categories.append(category)
+                    category_sources[category] = []
+                source = f"{ps_id}.{source_type}"
+                if source not in category_sources[category]:
+                    category_sources[category].append(source)
+
+    return selected_categories, category_sources
+
+
+def aggregate_gene_disease_maps(gene_maps: pd.DataFrame) -> pd.DataFrame:
+    """
+    Collapse multiple OMIM provenance rows into one disease-level map.
+
+    Risk identity is variant + inheritance bucket + disease_id. OMIM IDs and
+    mapping inheritance remain visible as reference-only provenance.
+    """
+    if gene_maps.empty:
+        return pd.DataFrame()
+
+    rows = []
+    for disease_id, group in gene_maps.groupby("disease_id", sort=False):
+        disease_names = list(dict.fromkeys(group["disease_name"].astype(str)))
+        omim_ids = list(dict.fromkeys(group["omim_id"].astype(str)))
+        inheritances = list(dict.fromkeys(group["inheritance"].astype(str)))
+
+        concerns = []
+        for concern_list in group["phenotype_concern_list"]:
+            for concern in split_semicolon_list(concern_list):
+                if concern not in concerns:
+                    concerns.append(concern)
+
+        rows.append(
+            {
+                "disease_id": disease_id,
+                "gene": str(group["gene"].iloc[0]),
+                "disease_name": " / ".join(disease_names),
+                "omim_ids": "; ".join(omim_ids),
+                "mapping_inheritance_reference": "; ".join(inheritances),
+                "phenotype_concern_list": "; ".join(concerns),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 def build_phenotype_relevance_and_risk_preview(
-    mvp_candidates: pd.DataFrame,
+    mapped_candidates: pd.DataFrame,
     mapping_df: pd.DataFrame,
     selected_categories: list[str],
+    category_sources: dict[str, list[str]] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Connect Geneyx MVP candidates to PM gene-disease-phenotype mapping,
-    then apply MVP risk tier rules.
+    Connect Geneyx P/LP candidates to the active disease mapping,
+    then apply the fixed four-tier rules.
     """
-    if mvp_candidates.empty:
+    if mapped_candidates.empty:
         columns = [
             "risk_level",
             "color",
@@ -466,78 +590,69 @@ def build_phenotype_relevance_and_risk_preview(
             "concern",
             "phenotype_relevance",
             "matched_phenotype_categories",
+            "matched_phenotype_sources",
             "gene",
             "variant",
             "disease_id",
             "disease_name",
+            "omim_ids",
+            "mapping_inheritance_reference",
             "inheritance_bucket",
             "relevance",
             "pathogenic",
-            "severity",
-            "referral",
             "rule_trace",
         ]
         return pd.DataFrame(columns=columns), pd.DataFrame(columns=columns)
 
+    category_sources = category_sources or {}
     selected_set = set(selected_categories)
     rows = []
 
-    for _, variant in mvp_candidates.iterrows():
+    for _, variant in mapped_candidates.iterrows():
         gene = str(variant.get("Gene", "")).upper().strip()
         gene_maps = mapping_df[mapping_df["gene"] == gene].copy()
-
-        # If no PM mapping exists, keep the candidate but mark as out-of-map.
+        gene_maps = aggregate_gene_disease_maps(gene_maps)
         if gene_maps.empty:
-            gene_maps = pd.DataFrame(
-                [
-                    {
-                        "disease_id": "",
-                        "gene": gene,
-                        "disease_name": "",
-                        "phenotype_concern_list": "",
-                        "inheritance": "",
-                        "severity": "",
-                        "referral": "",
-                        "possible_tiers": "",
-                    }
-                ]
-            )
+            continue
 
         for _, mapping in gene_maps.iterrows():
             phenotype_concerns = split_semicolon_list(mapping.get("phenotype_concern_list", ""))
             matched_categories = sorted(selected_set.intersection(set(phenotype_concerns)))
             phenotype_relevance = "Yes" if matched_categories else "No"
+            matched_sources = []
+            for category in matched_categories:
+                for source in category_sources.get(category, []):
+                    source_label = f"{source}: {category}"
+                    if source_label not in matched_sources:
+                        matched_sources.append(source_label)
 
             inheritance_bucket = str(variant.get("inheritance_bucket", ""))
             relevance = str(variant.get("Relevance", "")).strip()
-            relevance_high = relevance.lower() == "high"
 
-            # MVP v0.4 interpreted-candidate rule:
-            # Only rows with both Relevance and Pathogenic values reach this function.
-            # Blank Relevance / Pathogenic rows were already filtered out because they
-            # were not selected by Geneyx's AI/HPO-based interpretation layer.
+            # Only Geneyx-interpreted P/LP rows reach this function. Primary
+            # and secondary phenotype categories have identical match weight.
             if inheritance_bucket in RELEVANCE_HIGH_BUCKETS:
                 if phenotype_relevance == "Yes":
                     risk_level = 1
                     color = "🔴 Red"
                     risk_tier = "High Attention"
-                    rule_trace = "Interpreted compatible bucket + phenotype relevance Yes"
+                    rule_trace = "P/LP compatible bucket + phenotype relevance Yes"
                 else:
                     risk_level = 2
                     color = "🟠 Orange"
                     risk_tier = "Targeted Follow-up"
-                    rule_trace = "Interpreted compatible bucket + phenotype relevance No"
+                    rule_trace = "P/LP compatible bucket + phenotype relevance No"
             elif inheritance_bucket == "Recessive HET":
                 if phenotype_relevance == "Yes":
                     risk_level = 3
                     color = "🟡 Yellow"
                     risk_tier = "Routine Monitoring"
-                    rule_trace = "Interpreted Recessive HET + phenotype relevance Yes"
+                    rule_trace = "P/LP Recessive HET + phenotype relevance Yes"
                 else:
                     risk_level = 4
                     color = "🔵 Blue"
                     risk_tier = "General Awareness"
-                    rule_trace = "Interpreted Recessive HET + phenotype relevance No"
+                    rule_trace = "P/LP Recessive HET + phenotype relevance No"
             else:
                 risk_level = 4
                 color = "🔵 Blue"
@@ -557,15 +672,18 @@ def build_phenotype_relevance_and_risk_preview(
                     "concern": "; ".join(phenotype_concerns),
                     "phenotype_relevance": phenotype_relevance,
                     "matched_phenotype_categories": "; ".join(matched_categories),
+                    "matched_phenotype_sources": "; ".join(matched_sources),
                     "gene": gene,
                     "variant": variant_label,
                     "disease_id": mapping.get("disease_id", ""),
                     "disease_name": mapping.get("disease_name", ""),
+                    "omim_ids": mapping.get("omim_ids", ""),
+                    "mapping_inheritance_reference": mapping.get(
+                        "mapping_inheritance_reference", ""
+                    ),
                     "inheritance_bucket": inheritance_bucket,
                     "relevance": relevance,
                     "pathogenic": variant.get("Pathogenic", ""),
-                    "severity": mapping.get("severity", ""),
-                    "referral": mapping.get("referral", ""),
                     "rule_trace": rule_trace,
                 }
             )
@@ -586,7 +704,7 @@ def build_phenotype_relevance_and_risk_preview(
 # -----------------------------
 # Sidebar
 # -----------------------------
-st.sidebar.title("WDBT Mockup v0.4")
+st.sidebar.title("WDBT Mockup v0.5")
 mode = st.sidebar.radio(
     "Mode",
     ["Function 1｜HPO Translation", "Function 2｜Risk Strata Preview"],
@@ -722,9 +840,10 @@ if mode == "Function 1｜HPO Translation":
 else:
     st.markdown("### Function 2｜分子證據與風險分層預覽")
     st.caption(
-        "MVP scope: DMD, FOLR1, GJB2, GRIN2B, SCN1A only. "
-        "This page uses Geneyx-interpreted rows only: Relevance and Pathogenic must both be filled. "
-        "PM-defined phenotype mapping is then used to generate a rule-based risk-strata preview."
+        "Active scope: all genes present in gene_disease_phenotype_map.csv. "
+        "Only Geneyx-interpreted P/LP rows are eligible: Relevance must be filled and "
+        "Pathogenic must equal Pathogenic or Likely Pathogenic. Primary and secondary "
+        "pan-syndrome categories have equal matching weight."
     )
 
 
@@ -788,7 +907,7 @@ else:
         physician_note = st.text_input("醫師補充描述", value="Headache", key="function2_note")
         sample_id = st.text_input("Sample ID", value="TS260508003", key="function2_sample")
 
-        run_preview = st.button("Run MVP Risk Preview", type="primary")
+        run_preview = st.button("Run Risk Preview", type="primary")
 
     with right:
         uploaded_files = {
@@ -811,24 +930,24 @@ else:
                 st.warning("Please select at least one pan-syndrome item.")
             else:
                 selected_pan = pan_df[pan_df["pan_syndrome_id"].isin(selected_ids)].copy()
-                selected_categories = []
+                selected_categories, category_sources = build_selected_category_context(
+                    selected_pan
+                )
 
-                for _, row in selected_pan.iterrows():
-                    selected_categories.extend(
-                        split_categories(
-                            row["primary_phenotype_category"],
-                            row["secondary_phenotype_category"],
-                        )
-                    )
-
-                selected_categories = sorted(set(selected_categories))
-
-                bucket_summary, all_candidates, interpreted_candidates, mvp_candidates = parse_all_geneyx_files(uploaded_files)
-                mvp_display = simplify_geneyx_candidates(mvp_candidates)
+                bucket_summary, all_candidates, interpreted_candidates = parse_all_geneyx_files(
+                    uploaded_files
+                )
+                mapped_candidates, unmapped_candidates = split_mapping_coverage(
+                    interpreted_candidates,
+                    mapping_df,
+                )
+                interpreted_display = simplify_geneyx_candidates(interpreted_candidates)
+                mapped_display = simplify_geneyx_candidates(mapped_candidates)
                 relevance_table, risk_preview = build_phenotype_relevance_and_risk_preview(
-                    mvp_candidates=mvp_candidates,
+                    mapped_candidates=mapped_candidates,
                     mapping_df=mapping_df,
                     selected_categories=selected_categories,
+                    category_sources=category_sources,
                 )
 
                 st.subheader("1. Selected pan-syndrome context")
@@ -855,22 +974,46 @@ else:
                     hide_index=True,
                 )
 
-                st.subheader("3. MVP interpreted Geneyx candidates")
-                st.caption("Only rows with both Relevance and Pathogenic values are shown. MVP scope genes: DMD, FOLR1, GJB2, GRIN2B, SCN1A.")
+                st.subheader("3. Interpreted P/LP Geneyx candidates")
+                st.caption(
+                    "Relevance is filled and Pathogenic is Pathogenic/Likely Pathogenic. "
+                    "VUS and benign rows are excluded."
+                )
                 st.dataframe(
-                    mvp_display,
+                    interpreted_display,
                     use_container_width=True,
                     hide_index=True,
                 )
 
-                st.subheader("4. Phenotype relevance mapping")
+                if not unmapped_candidates.empty:
+                    unmapped_genes = sorted(
+                        set(
+                            unmapped_candidates["Gene"]
+                            .astype(str)
+                            .str.upper()
+                            .str.strip()
+                        )
+                    )
+                    st.info(
+                        "P/LP candidates outside the active disease map are retained for trace "
+                        f"but not assigned a risk tier: {', '.join(unmapped_genes)}"
+                    )
+
+                st.subheader("4. P/LP candidates covered by active disease mapping")
+                st.dataframe(
+                    mapped_display,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.subheader("5. Phenotype relevance mapping")
                 st.dataframe(
                     relevance_table,
                     use_container_width=True,
                     hide_index=True,
                 )
 
-                st.subheader("5. Risk strata preview")
+                st.subheader("6. Risk strata preview")
                 st.dataframe(
                     risk_preview,
                     use_container_width=True,
@@ -884,4 +1027,3 @@ else:
                     mime="text/csv",
                     type="primary",
                 )
-
