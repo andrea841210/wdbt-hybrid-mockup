@@ -713,6 +713,11 @@ mode = st.sidebar.radio(
 st.sidebar.caption(
     "Hybrid mockup only. Not a production system, not a clinical decision support tool."
 )
+st.sidebar.link_button(
+    "View app.py on GitHub",
+    "https://github.com/andrea841210/wdbt-hybrid-mockup/blob/main/app.py",
+    use_container_width=True,
+)
 
 pdf_path = ASSET_DIR / "WDBT_UI_all-2.pdf"
 if pdf_path.exists():
