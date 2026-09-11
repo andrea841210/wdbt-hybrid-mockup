@@ -1,4 +1,5 @@
 pan_syndrome_id,display_order,section_code,section_name,pan_syndrome_zh,primary_phenotype_category,secondary_phenotype_category
+PS000,0,N,健檢情境,目前無明顯泛性症狀（Nil）,,
 PS001,1,A,發展、學習與互動,發展感覺比同齡孩子慢，例如坐、爬、站、走比較晚,developmental delay concern,motor weakness concern; musculoskeletal concern
 PS002,2,A,發展、學習與互動,說話、學習、理解指令或記憶能力疑似比同齡孩子慢,language / cognitive concern,developmental delay concern
 PS003,3,A,發展、學習與互動,叫名字反應少，或對人互動反應比較少,social interaction / behavioral concern,hearing concern
