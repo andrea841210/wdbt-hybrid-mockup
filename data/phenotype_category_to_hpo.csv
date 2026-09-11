@@ -28,7 +28,8 @@ language / cognitive concern	HP:0100543	Cognitive impairment	FALSE
 motor weakness concern	HP:0001324	Muscle weakness	FALSE	
 musculoskeletal concern	HP:0040068	Abnormality of limb bone	FALSE	
 musculoskeletal concern	HP:0011843	Abnormal musculoskeletal physiology	FALSE	
-musculoskeletal concern	HP:0012531	Pain	FALSE	
+musculoskeletal concern	HP:0012531	Pain	FALSE
+musculoskeletal concern HP:0000924	Abnormality of the skeletal system	FALSE
 recurrent / unusual infection concern	HP:0010978	Abnormality of immune system physiology	FALSE	
 recurrent / unusual infection concern	HP:0032101	Unusual infection	FALSE	
 renal / urinary concern	HP:0000079	Abnormality of the urinary system	FALSE	
