@@ -536,6 +536,11 @@ def build_selected_category_context(
     return selected_categories, category_sources
 
 
+def has_invalid_nil_selection(selected_ids: list[str]) -> bool:
+    """Return True when PS000 (Nil) is combined with a symptomatic PS ID."""
+    return "PS000" in selected_ids and len(selected_ids) > 1
+
+
 def aggregate_gene_disease_maps(gene_maps: pd.DataFrame) -> pd.DataFrame:
     """
     Collapse multiple OMIM provenance rows into one disease-level map.
@@ -786,6 +791,11 @@ if mode == "Function 1｜HPO Translation":
     with right:
         if not selected_ids:
             st.warning("Please select at least one pan-syndrome item.")
+        elif has_invalid_nil_selection(selected_ids):
+            st.error(
+                "PS000 (Nil) must be selected alone. "
+                "Please remove PS000 or all other pan-syndrome selections."
+            )
         elif run_translation:
             selected_pan, category_expansion, hpo_mapping, geneyx_ready = build_function1_outputs(
                 selected_ids=selected_ids,
@@ -933,6 +943,11 @@ else:
                 )
             elif not selected_ids:
                 st.warning("Please select at least one pan-syndrome item.")
+            elif has_invalid_nil_selection(selected_ids):
+                st.error(
+                    "PS000 (Nil) must be selected alone. "
+                    "Please remove PS000 or all other pan-syndrome selections."
+                )
             else:
                 selected_pan = pan_df[pan_df["pan_syndrome_id"].isin(selected_ids)].copy()
                 selected_categories, category_sources = build_selected_category_context(
@@ -1032,3 +1047,4 @@ else:
                     mime="text/csv",
                     type="primary",
                 )
+
